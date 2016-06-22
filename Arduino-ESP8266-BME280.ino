@@ -1,11 +1,20 @@
 #include <ESP8266WiFi.h>
 #include <Wire.h>
 #include "BME280.h"
-#include "ambient.h"
+#include "Ambient.h"
 
 extern "C" {
 #include "user_interface.h"
 }
+
+#define _DEBUG 1
+#if _DEBUG
+#define DBG(...) { Serial.print(__VA_ARGS__); }
+#define DBGLED(...) { digitalWrite(__VA_ARGS__); }
+#else
+#define DBG(...)
+#define DBGLED(...)
+#endif /* _DBG */
 
 #define LED 4
 #define SDA 14
@@ -13,47 +22,53 @@ extern "C" {
 
 #define PERIOD 300
 
-//#define VERBOSE
-
-const char* ssid = "・・・SSID・・・";
-const char* password = "・・・パスワード・・・";
-
-const char* key = "・・・Ambientのチャネル・キー・・・";
-
+const char* ssid = "ssid";
+const char* password = "password";
 WiFiClient client;
-AMBIENT ambient(key, &client);
+
+unsigned int channelId = 100;
+const char* writeKey = "...writeKey...";
+Ambient ambient;
 
 BME280 bme280;
+
+void ftoa(double val, char *buf) {
+    itoa((int)val, buf, 10);
+    int i = strlen(buf);
+    buf[i++] = '.';
+    val = (int)(val * 10) % 10;
+    itoa(val, &buf[i], 10);
+}
 
 void setup()
 {
     int t = millis();
-    wifi_set_sleep_type(LIGHT_SLEEP_T);
+    wifi_set_sleep_type(LIGHT_SLEEP_T);    
 
-#ifdef VERBOSE
+#ifdef _DEBUG
     Serial.begin(115200);
     delay(10);
-    Serial.println("Start");
-    pinMode(LED, OUTPUT);
 #endif
+    DBG("Start");
+    pinMode(LED, OUTPUT);
 
     WiFi.begin(ssid, password);
 
     int i = 0;
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
-#ifdef VERBOSE
-        digitalWrite(LED, i++ % 2);
-        Serial.print(".");
-#endif
-    }
-#ifdef VERBOSE
-    digitalWrite(LED, LOW);
-    Serial.println("WiFi connected");
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
-#endif
 
+        DBGLED(LED, i++ % 2);
+        DBG(".");
+    }
+
+    DBGLED(LED, LOW);
+    DBG("WiFi connected");
+    DBG("IP address: ");
+    DBG(WiFi.localIP());
+    DBG("\r\n");
+    
+    ambient.begin(channelId, writeKey, &client);
     bme280.begin(SDA, SCL);
 
     // 電源投入直後の値は不安定なので、読み捨てる
@@ -61,42 +76,38 @@ void setup()
     bme280.readHumidity();
     bme280.readPressure();
     double temp = 0.0, pressure = 0.0, humid=0.0;
-    char tempbuf[8];
-    char humidbuf[8];
-    char pressurebuf[8];
+    char tempbuf[12];
+    char humidbuf[12];
+    char pressurebuf[12];
 
     temp = bme280.readTemperature();
     humid = bme280.readHumidity();
     pressure = bme280.readPressure();
 
-#ifdef VERBOSE
-    Serial.print("temp: ");
-    Serial.print(temp);
-    Serial.print(" DegC,  humid: ");
-    Serial.print(humid);
-    Serial.print(" %, pressure: ");
-    Serial.print(pressure);
-    Serial.println(" hPa");
-#endif
+    DBG("temp: ");
+    DBG(temp);
+    DBG(" DegC,  humid: ");
+    DBG(humid);
+    DBG(" %, pressure: ");
+    DBG(pressure);
+    DBG(" hPa\r\n");
 
     ftoa(temp, tempbuf);
+    ambient.set(1, tempbuf);
     ftoa(humid, humidbuf);
+    ambient.set(2, humidbuf);
     ftoa(pressure, pressurebuf);
+    ambient.set(3, pressurebuf);
 
-#ifdef VERBOSE
-    digitalWrite(LED, HIGH);
-#endif
-    ambient.post("temp", tempbuf, "humid", humidbuf, "pressure", pressurebuf);
-#ifdef VERBOSE
-    digitalWrite(LED, LOW);
-    Serial.print("dt: ");
-#endif
+    DBGLED(LED, HIGH);
+
+    ambient.send();
+
+    DBGLED(LED, LOW);
+
     t = millis() - t;
-#ifdef VERBOSE
-    Serial.println(t);
-#endif
     t = (t < PERIOD * 1000) ? (PERIOD * 1000 - t) : 1;
-    ESP.deepSleep(t * 1000, RF_DISABLED);
+    ESP.deepSleep(t * 1000, RF_DEFAULT);
     delay(1000);
 }
 
@@ -108,10 +119,3 @@ void loop()
     }
 }
 
-void ftoa(double val, char *buf) {
-    itoa((int)val, buf, 10);
-    int i = strlen(buf);
-    buf[i++] = '.';
-    val = (int)(val * 10) % 10;
-    itoa(val, &buf[i], 10);
-}
