@@ -32,7 +32,7 @@ void BME280::begin(int sda, int sck) {
 }
 
 double BME280::readTemperature(void) {
-    unsigned long int temp_raw;
+    signed long int temp_raw;
     signed long int var1, var2;
   
     int i = 0;
